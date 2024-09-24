@@ -2,7 +2,6 @@ import socket
 import ssl
 import gzip
 import logging
-import re
 
 # Constants
 BUFFER_SIZE = 4096
@@ -87,7 +86,9 @@ def retrieve_url(url, max_redirects=5):
         # Check for 301 Moved Permanently (Redirect)
         status_line = headers.splitlines()[0]
         if "301" in status_line and "Location:" in headers and max_redirects > 0:
-            location = re.search(r"Location: (.+?)\r\n", headers).group(1)
+            location_start = headers.find("Location: ") + len("Location: ")
+            location_end = headers.find("\r\n", location_start)
+            location = headers[location_start:location_end].strip()
             if not location.startswith("http"):
                 # Handle relative redirects
                 location = f"{protocol}://{host}{location}"
@@ -109,7 +110,9 @@ def retrieve_url(url, max_redirects=5):
 
         # Handle content length for non-chunked responses
         if "Content-Length" in headers:
-            content_length = int(re.search(r"Content-Length: (\d+)", headers).group(1))
+            content_length_start = headers.find("Content-Length: ") + len("Content-Length: ")
+            content_length_end = headers.find("\r\n", content_length_start)
+            content_length = int(headers[content_length_start:content_length_end].strip())
             while len(body) < content_length:
                 body += sock.recv(min(BUFFER_SIZE, content_length - len(body)))
 
@@ -133,3 +136,4 @@ if __name__ == "__main__":
         sys.stdout.buffer.write(retrieve_url(sys.argv[1]))
     else:
         print("Usage: python hw1.py <url>")
+
