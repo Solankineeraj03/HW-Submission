@@ -2,7 +2,6 @@ import socket
 import ssl
 import gzip
 import logging
-import re
 
 # Constants
 BUFFER_SIZE = 4096
@@ -84,30 +83,22 @@ def retrieve_url(url, max_redirects=5):
         headers, body = response.split(b"\r\n\r\n", 1)
         headers = headers.decode()
 
-        # Check for redirects
-        status_line = headers.splitlines()[0]
-        if "301" in status_line or "302" in status_line:
-            location_start = headers.find("Location: ") + len("Location: ")
-            location_end = headers.find("\r\n", location_start)
-            location = headers[location_start:location_end].strip()
-            if not location.startswith("http"):
-                # Handle relative redirects
-                location = f"{protocol}://{host}{location}"
-            logging.info(f"Redirecting to {location}")
-            if max_redirects > 0:
-                return retrieve_url(location, max_redirects - 1)
-            else:
-                logging.error(f"Too many redirects for {url}")
-                return None
+        # Check for redirection
+        if "301" in headers or "302" in headers:
+            for line in headers.splitlines():
+                if "Location:" in line:
+                    location = line.split("Location: ")[1].strip()
+                    logging.info(f"Redirecting to {location}")
+                    return retrieve_url(location, max_redirects - 1)
 
         # Check if the status code is 200
-        if "200" not in status_line:
-            logging.error(f"Non-200 status code: {status_line}")
+        if "200 OK" not in headers:
+            logging.error(f"Non-200 status code: {headers.splitlines()[0]}")
             return None
 
         # Handle chunked transfer encoding
         if "Transfer-Encoding: chunked" in headers:
-            body += handle_chunked_response(sock)
+            body = handle_chunked_response(sock)
 
         # Handle gzip encoding if present
         if "Content-Encoding: gzip" in headers:
@@ -115,11 +106,14 @@ def retrieve_url(url, max_redirects=5):
 
         # Handle content length for non-chunked responses
         if "Content-Length" in headers:
-            content_length_start = headers.find("Content-Length: ") + len("Content-Length: ")
-            content_length_end = headers.find("\r\n", content_length_start)
-            content_length = int(headers[content_length_start:content_length_end].strip())
-            while len(body) < content_length:
-                body += sock.recv(min(BUFFER_SIZE, content_length - len(body)))
+            content_length = None
+            for line in headers.splitlines():
+                if line.startswith("Content-Length:"):
+                    content_length = int(line.split(":")[1].strip())
+                    break
+            if content_length is not None and len(body) < content_length:
+                while len(body) < content_length:
+                    body += sock.recv(min(BUFFER_SIZE, content_length - len(body)))
 
         return body
 
@@ -134,29 +128,13 @@ def retrieve_url(url, max_redirects=5):
             sock.close()
     return None
 
-# Function to check if a page is dynamic
-def is_dynamic_page(url):
-    first_fetch = retrieve_url(url)
-    second_fetch = retrieve_url(url)
-
-    # If the responses are different or None, it's a dynamic page
-    if first_fetch is None or second_fetch is None or first_fetch != second_fetch:
-        return True
-    return False
-
 # Main execution block
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
-        if is_dynamic_page(sys.argv[1]):
-            print("This page is dynamic, returning None.")
-        else:
-            response = retrieve_url(sys.argv[1])
-            if response is not None:
-                sys.stdout.buffer.write(response)
-            else:
-                print("Failed to retrieve the URL.")
+        sys.stdout.buffer.write(retrieve_url(sys.argv[1]))
     else:
         print("Usage: python hw1.py <url>")
+
 
 
